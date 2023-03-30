@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 
@@ -122,10 +123,10 @@ public class MainView : View
 
 public class Nonogram
 {
-    private const byte WHITE = 255;
-    private const byte UNKNOWBLACK = 254;
-    private const byte BASELINE = 128;
-    private const byte UNKNOW = 0;
+    private const byte white = 255;
+    private const byte unknowBlack = 254;
+    private const byte baseLine = 128;
+    private const byte unknow = 0;
 
     private int size;
     private byte[] data;
@@ -142,8 +143,8 @@ public class Nonogram
     {
         this.size = size;
         this.data = new byte[size * size];
-        this.horRules = new List<int[]>();
-        this.verRules = new List<int[]>();
+        this.horRules = new List<byte[]>();
+        this.verRules = new List<byte[]>();
     }
 
     public void HorizontalAdd(params byte[] arr)
@@ -153,7 +154,7 @@ public class Nonogram
         => this.verRules.Add(arr);
     
     public void AddUnknowBlack(int i, int j)
-        => this[i, j] = UNKNOWBLACK;
+        => this[i, j] = unknowBlack;
 
     public void Draw(RectangleF rect, IGraphics g)
     {
@@ -205,147 +206,299 @@ public class Nonogram
 
     private void minMaxSolutionColumnInterseption(int column)
     {
-        var rule = verRules[column];
-        if (rule.Length == 0)
-        {
-            for (int i = 0; i < size; i++)
-                this[column, i] = WHITE;
-            return;
-        }
-
-        byte[] left = new byte[size];
-        byte[] right = new byte[size];
-        for (int i = 0; i < size; i++)
-        {
-            left[i] = this[column, i];
-            right[i] = this[column, i];
-        }
-
-        int s = 0;
-        for (int j = 0; j < rule.Length; j++)
-        {
-            var color = (byte)(j + 1);
-
-            bool hasSpace = testSpace(left, s, rule[j], color);
-            if (!hasSpace)
-                continue;
-            
-            for (int k = 0; k < rule[j]; k++, s++)
-                left[s] = color;
-            
-            s++;
-        }
-        
-        s = size - 1;
-        for (int j = rule.Length - 1; j >= 0; j--)
-        {
-            var color = (byte)(j + 1);
-
-            bool hasSpace = testSpace(right, s - rule[j], rule[j], color);
-            if (!hasSpace)
-                continue;
-            
-            for (int k = 0; k < rule[j]; k++, s--)
-                right[s] = color;
-            
-            s--;
-        }
-
-        for (int i = 0; i < size; i++)
-        {
-            if (left[i] == right[i])
-                this[i, column] = left[i];
-        }
+        var data = getFilteredDataCopy(column, false);
+        var rule = horRules[column];
+        minMaxSolutionInterseption(data, rule);
+        setFilteredDataCopy(column, false, data);
     }
 
     private void minMaxSolutionLineInterseption(int line)
     {
+        var data = getFilteredDataCopy(line, true);
         var rule = horRules[line];
-        if (rule.Length == 0)
-        {
-            for (int i = 0; i < size; i++)
-                this[i, line] = WHITE;
-            return;
-        }
+        minMaxSolutionInterseption(data, rule);
+        setFilteredDataCopy(line, true, data);
+    }
 
-        byte[] left = new byte[size];
-        byte[] right = new byte[size];
-        for (int i = 0; i < size; i++)
-        {
-            left[i] = this[i, line];
-            right[i] = this[i, line];
-        }
+    private void minMaxSolutionInterseption(byte[] data, byte[] rule)
+    {
+        var minData = copy(data);
+        minSolution(minData, rule);
 
-        int s = 0;
-        for (int j = 0; j < rule.Length; j++)
-        {
-            var color = (byte)(j + 1);
-
-            bool hasSpace = testSpace(left, s, rule[j], color);
-            if (!hasSpace)
-                continue;
-            
-            for (int k = 0; k < rule[j]; k++, s++)
-                left[s] = color;
-            
-            s++;
-        }
-        
-        s = size - 1;
-        for (int j = rule.Length - 1; j >= 0; j--)
-        {
-            var color = (byte)(j + 1);
-
-            bool hasSpace = testSpace(right, s - rule[j], rule[j], color);
-            if (!hasSpace)
-                continue;
-            
-            for (int k = 0; k < rule[j]; k++, s--)
-                right[s] = color;
-            
-            s--;
-        }
+        var maxData = copy(data);
+        revert(maxData);
+        swapColors(maxData, rule.Length);
+        minSolution(maxData, rule);
+        swapColors(maxData, rule.Length);
+        revert(maxData);
 
         for (int i = 0; i < size; i++)
         {
-            if (left[i] == right[i])
-                this[i, line] = left[i];
+            if (minData[i] == maxData[i])
+                data[i] = minData[i];
+        }
+
+        decideUnknowBlack(data);
+        discoverBySize(data, rule);
+    }
+
+    private void swapColors(byte[] arr, int colorCount)
+    {
+        for (int i = 0; i < arr.Length; i++)
+        {
+            if (arr[i] == unknow || arr[i] >= unknowBlack)
+                continue;
+            
+            arr[i] = (byte)(colorCount + 1 - arr[i]);
+        }
+    }
+    
+    private void revert(byte[] arr)
+    {
+        int end = arr.Length - 1;
+        for (int i = 0; i < arr.Length / 2; i++)
+        {
+            byte temp = arr[i];
+            arr[i] = arr[end - i];
+            arr[end - i] = temp;
         }
     }
 
-    private byte[] minSolution(byte[] data, byte[] rule)
+    private byte[] copy(byte[] arr)
     {
-        byte[] solution = new byte[size];
+        byte[] copy = new byte[size];
+        Array.Copy(arr, copy, arr.Length);
+        return copy;
+    }
 
-        int s = 0;
+    private void setFilteredDataCopy(int baseIndex, bool isLineFilter, byte[] data)
+    {
+        for (int k = 0; k < size; k++)
+        {
+            int index = isLineFilter ?
+                k + baseIndex * size :
+                baseIndex + k * size;
+
+            var value = this.data[index];
+            var newValue = data[k];
+
+            if (value == newValue)
+                continue;
+
+            if (newValue == unknow)
+                continue;
+            
+            if (newValue >= unknowBlack)
+            {
+                this.data[index] = newValue;
+                continue;
+            }
+
+            if (value == unknowBlack)
+                value = unknow;
+
+            this.data[index] = isLineFilter ?
+                (byte)((value & 0b1111_0000) + newValue) :
+                (byte)((value & 0b0000_1111) + (newValue << 4));
+        }
+    }
+
+    private byte[] getFilteredDataCopy(int baseIndex, bool isLineFilter)
+    {
+        byte[] copy = new byte[size];
+
+        for (int k = 0; k < size; k++)
+        {
+            int index = isLineFilter ?
+                k + baseIndex * size :
+                baseIndex + k * size;
+
+            var value = data[index];
+
+            if (value > unknow && value < unknowBlack)
+            {
+                value = isLineFilter ?
+                    (byte)(value % 16) :
+                    (byte)(value >> 4);
+                
+                if (value == 0)
+                    value = unknowBlack;
+            }
+
+            copy[k] = value;
+        }
+
+        return copy;
+    }
+    
+    private void decideUnknowBlack(byte[] data)
+    {
+        for (int i = 1; i < size - 1; i++)
+        {
+            if (data[i] != unknowBlack)
+                continue;
+            
+            var value = data[i - 1];
+            if (value != unknowBlack && value != white && value != unknow)
+                data[i] = value;
+            
+            value = data[i + 1];
+            if (value != unknowBlack && value != white && value != unknow)
+                data[i] = value;
+        }
+        
+        for (int i = size - 2; i > 0; i--)
+        {
+            if (data[i] != unknowBlack)
+                continue;
+            
+            var value = data[i - 1];
+            if (value != unknowBlack && value != white && value != unknow)
+                data[i] = value;
+            
+            value = data[i + 1];
+            if (value != unknowBlack && value != white && value != unknow)
+                data[i] = value;
+        }
+    }
+    
+    private void discoverBySize(byte[] data, byte[] rule)
+    {
+        int sequenceSize = 0;
+        bool inSequence = false;
+        for (int i = 0; i < size; i++)
+        {
+            if (data[i] > unknow && data[i] < white)
+            {
+                sequenceSize++;
+                inSequence = true;
+                continue;
+            }
+            
+            if (!inSequence)
+                continue;
+            
+            inSequence = false;
+            int seqSize = sequenceSize;
+            sequenceSize = 0;
+            
+            if (data[i - 1] == unknowBlack)
+                continue;
+            
+            if (seqSize < rule[data[i - 1] - 1])
+                continue;
+            
+            if (i < size)
+                data[i] = white;
+            
+            if (i - 1 - seqSize >= 0)
+                data[i - 1 - seqSize] = white;
+        }
+    }
+
+    private void minSolution(byte[] solutionBuffer, byte[] rule)
+    {
+        int i = 0;
+        byte[] solution = solutionBuffer;
+        var colorBins = countColor(solutionBuffer, rule.Length);
+
         for (int j = 0; j < rule.Length; j++)
         {
             var color = (byte)(j + 1);
+            var ruleSize = rule[j];
 
-            bool hasSpace = testSpace(solution, s, rule[j], color);
+            if (colorBins[j] > 0)
+            {
+                fillColor(solution, color);
+                int max = findMaxColor(solution, color);
+                i = max - ruleSize + 1;
+            }
+
+            bool hasSpace = testSpace(solution, i, rule[j], color);
             if (!hasSpace)
                 continue;
             
-            for (int k = 0; k < rule[j]; k++, s++)
-                solution[s] = color;
+            for (int k = 0; k < rule[j]; k++, i++)
+                solution[i] = color;
             
-            s++;
-        } 
+            i++;
+        }
+    }
 
-        return solution;
+    private void fillColor(byte[] arr, byte color)
+    {
+        int min = findMinColor(arr, color);
+        var max = findMaxColor(arr, color);
+
+        if (min == max)
+            return;
+
+        for (int i = min + 1; i < max; i++)
+            arr[i] = color;
+    }
+
+    private int[] countColor(byte[] arr, int colorCount)
+    {
+        int[] count = new int[colorCount];
+        
+        for (int i = 0; i < arr.Length; i++)
+        {
+            if (arr[i] > unknow && arr[i] < unknowBlack)
+                count[arr[i] - 1]++;
+        }
+
+        return count;
+    }
+
+    private int findMinColor(byte[] arr, byte color)
+    {
+        for (int i = 0; i < arr.Length; i++)
+        {
+            if (arr[i] == color)
+                return i;
+        }
+        return -1;
+    }
+
+    private int findMaxColor(byte[] arr, byte color)
+    {
+        for (int i = arr.Length - 1; i >= 0; i--)
+        {
+            if (arr[i] == color)
+                return i;
+        }
+        return -1;
     }
 
     private bool testSpace(byte[] arr, int start, int needSpace, byte crrColor)
     {
         if (start < 0)
             return false;
-
-        if (start + needSpace > arr.Length)
+        
+        int end = start + needSpace;
+        if (end > arr.Length)
             return false;
 
-        for (int i = start; i < needSpace; i++)
-            if (arr[i] != crrColor && arr[i] != UNKNOW && arr[i] != UNKNOWBLACK)
-                return false;
+        for (int i = start; i < end; i++)
+        {
+            if (arr[i] == unknow)
+                continue;
+            
+            if (arr[i] == crrColor)
+                continue;
+            
+            if (arr[i] == unknowBlack)
+                continue;
+            
+            return false;
+        }
+
+        if (end == arr.Length)
+            return true;
+        
+        int next = arr[end];
+        if (next < white && next > unknow)
+            return false;
             
         return true;
     }
